@@ -1,1 +1,1 @@
-This is the study code of CNN and MLP
+This is the study code of CNN, MLP and RNN
