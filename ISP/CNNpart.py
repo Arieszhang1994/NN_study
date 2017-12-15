@@ -11,25 +11,37 @@ class ResUnitC_B_R:
     '''
     Residual block
     '''
-    def __init__(self, filter_shape, function=tf.nn.relu, strides=[1, 1, 1, 1], padding='SAME'):
+    def __init__(self, filter_shape_1, filter_shape_2, function=tf.nn.relu, strides=[1, 1, 1, 1], padding1='SAME',padding2='SAME', down_sample, different_shape, projection_method='1x1conv'):
         # Xavier Initialization
-        fan_in = np.prod(filter_shape[:3])
-        fan_out = np.prod(filter_shape[:2]) * filter_shape[3]
+        fan_in_1 = np.prod(filter_shape_1[:3])
+        fan_out_1 = np.prod(filter_shape_1[:2]) * filter_shape_1[3]
+        fan_in_2 = np.prod(filter_shape_2[:3])
+        fan_out_2 = np.prod(filter_shape_2[:2]) * filter_shape_2[3]
         self.W1 = tf.Variable(rng.uniform(
-                        low=-np.sqrt(6/(fan_in + fan_out)),
-                        high=np.sqrt(6/(fan_in + fan_out)),
-                        size=filter_shape
+                        low=-np.sqrt(6/(fan_in_1 + fan_out_1)),
+                        high=np.sqrt(6/(fan_in_1 + fan_out_1)),
+                        size=filter_shape_1
                     ).astype('float32'), name='W1')
-        self.b1 = tf.Variable(np.zeros((filter_shape[3]), dtype='float32'), name='b1')
+        self.b1 = tf.Variable(np.zeros((filter_shape_1[3]), dtype='float32'), name='b1')
         self.W2 = tf.Variable(rng.uniform(
-                        low=-np.sqrt(6/(fan_in + fan_out)),
-                        high=np.sqrt(6/(fan_in + fan_out)),
-                        size=filter_shape
+                        low=-np.sqrt(6/(fan_in_2 + fan_out_2)),
+                        high=np.sqrt(6/(fan_in_2 + fan_out_2)),
+                        size=filter_shape_2
                     ).astype('float32'), name='W2')
-        self.b2 = tf.Variable(np.zeros((filter_shape[3]), dtype='float32'), name='b2')
+        self.b2 = tf.Variable(np.zeros((filter_shape_2[3]), dtype='float32'), name='b2')
+        self.W_add = tf.Variable(rng.uniform(
+                        low=-np.sqrt(6/(fan_in_1 + fan_out_1)),
+                        high=np.sqrt(6/(fan_in_1 + fan_out_1)),
+                        size=filter_shape_1
+                    ).astype('float32'), name='W_add')
+        self.b_add = tf.Variable(np.zeros((filter_shape_1[3]), dtype='float32'), name='b_add')
         self.function = function
         self.strides = strides
-        self.padding = padding
+        self.padding1 = padding1
+        self.padding2 = padding2
+        self.down_sample = down_sample
+        self.projection_method = projection_method
+        self.different_shape = different_shape
 
     def f_prop(self, x):
 
@@ -48,18 +60,27 @@ class ResUnitC_B_R:
             bn_layer = tf.nn.batch_normalization(input_layer, mean, variance, beta, gamma, BN_EPSILON)
 
             return bn_layer
-
-        l1 = tf.nn.conv2d(x, self.W1, strides=self.strides, padding=self.padding) + self.b1
+        
+        if self.down_sample:
+            l1 = tf.nn.conv2d(x, self.W1, strides=[1, 2, 2, 1], padding=self.padding1) + self.b1
+        else:
+            l1 = tf.nn.conv2d(x, self.W1, strides=self.strides, padding=self.padding1) + self.b1
         l1_acted = self.function(batch_normalization_laye(l1))
-        l2 = tf.nn.conv2d(l1_acted, self.W2, strides=self.strides, padding=self.padding) + self.b2
-        l_added = batch_normalization_laye(l2) + x
+        l2 = tf.nn.conv2d(l1_acted, self.W2, strides=self.strides, padding=self.padding2) + self.b2
+        if self.down_sample:
+            x_add = tf.nn.conv2d(x, self.W_add, strides=[1, 2, 2, 1], padding=self.padding1) + self.b_add
+        elif self.different_shape:
+            x_add = tf.nn.conv2d(x, self.W_add, strides=self.strides, padding=self.padding1) + self.b_add
+        else:
+             x_add = x  
+        l_added = batch_normalization_laye(l2) + x_add
         return self.function(l_added)
 
 class ResUnitB_R_C:
     '''
     Residual block
     '''
-    def __init__(self, filter_shape, function=tf.nn.relu, strides=[1, 1, 1, 1], padding='SAME'):
+    def __init__(self, filter_shape, function=tf.nn.relu, strides=[1, 1, 1, 1], padding1='SAME',padding2='SAME', down_sample, different_shape, projection_method='1x1conv'):
         # Xavier Initialization
         fan_in = np.prod(filter_shape[:3])
         fan_out = np.prod(filter_shape[:2]) * filter_shape[3]
@@ -75,9 +96,19 @@ class ResUnitB_R_C:
                         size=filter_shape
                     ).astype('float32'), name='W2')
         self.b2 = tf.Variable(np.zeros((filter_shape[3]), dtype='float32'), name='b2')
+        self.W_add = tf.Variable(rng.uniform(
+                        low=-np.sqrt(6/(fan_in + fan_out)),
+                        high=np.sqrt(6/(fan_in + fan_out)),
+                        size=filter_shape
+                    ).astype('float32'), name='W_add')
+        self.b_add = tf.Variable(np.zeros((filter_shape[3]), dtype='float32'), name='b_add')
         self.function = function
         self.strides = strides
-        self.padding = padding
+        self.padding1 = padding1
+        self.padding2 = padding2
+        self.down_sample = down_sample
+        self.projection_method = projection_method
+        self.different_shape = different_shape
 
     def f_prop(self, x):
 
@@ -97,10 +128,19 @@ class ResUnitB_R_C:
 
             return bn_layer
         r_x = self.function(batch_normalization_laye(x))
-        l1 = tf.nn.conv2d(r_x, self.W1, strides=self.strides, padding=self.padding) + self.b1
+        if self.down_sample:
+            l1 = tf.nn.conv2d(r_x, self.W1, strides=[1, 2, 2, 1], padding=self.padding1) + self.b1
+        else:
+            l1 = tf.nn.conv2d(r_x, self.W1, strides=self.strides, padding=self.padding1) + self.b1
         r_l1 = self.function(batch_normalization_laye(l1))
-        l2 = tf.nn.conv2d(r_l1, self.W2, strides=self.strides, padding=self.padding) + self.b2
-        return l2 + x
+        l2 = tf.nn.conv2d(r_l1, self.W2, strides=self.strides, padding=self.padding2) + self.b2
+        if self.down_sample:
+            x_add = tf.nn.conv2d(x, self.W_add, strides=[1, 2, 2, 1], padding=self.padding1) + self.b_add
+        elif self.different_shape:
+            x_add = tf.nn.conv2d(x, self.W_add, strides=self.strides, padding=self.padding1) + self.b_add
+        else:
+             x_add = x   
+        return l2 + x_add
 
 class Conv:
     '''
